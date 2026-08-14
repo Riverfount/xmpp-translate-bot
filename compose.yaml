@@ -1,0 +1,37 @@
+# Compatível com `docker compose` e `podman compose` / `podman-compose`.
+# Uso: copie .env.example para .env, preencha os valores, então
+#   docker compose up --build     (ou: podman compose up --build)
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: xmpp-translate-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "9090:9090"
+    depends_on:
+      - influxdb2
+
+  influxdb2:
+    image: docker.io/library/influxdb:2.9
+    container_name: influxdb2
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_INIT_PASSWORD:?defina INFLUXDB_INIT_PASSWORD no .env}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_INIT_TOKEN:?defina INFLUXDB_INIT_TOKEN no .env}
+      DOCKER_INFLUXDB_INIT_ORG: isacloud
+      DOCKER_INFLUXDB_INIT_BUCKET: telegraf
+      INFLUXD_USE_HASHED_TOKENS: "false"
+      INFLUXD_LOG_LEVEL: info
+      INFLUXD_STORAGE_WAL_FSYNC_DELAY: 100ms
+      INFLUXD_STORAGE_WRITE_TIMEOUT: 30s
+    volumes:
+      - ./data/influxdb2:/var/lib/influxdb2

@@ -1,0 +1,27 @@
+[Unit]
+Description=Bot de tradução XMPP (LibreTranslate)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Fora do repositório, permissão 600 -- contém XMPP_PASSWORD, LT_API_KEY e,
+# se aplicável, INFLUX_TOKEN. Ver configs/config.example.yaml para as demais
+# chaves (não-secretas) que também podem morar aqui ou em CONFIG_FILE.
+EnvironmentFile=/etc/xmpp-translate-bot/env
+ExecStart=/usr/local/bin/bot
+Restart=on-failure
+RestartSec=5s
+
+# Endurecimento básico -- o binário não precisa de mais que isso: sem
+# sistema de arquivos gravável, sem privilégios novos, sem acesso a
+# dispositivos.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+[Install]
+WantedBy=multi-user.target

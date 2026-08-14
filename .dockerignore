@@ -1,0 +1,10 @@
+# Compatível com docker build e podman build.
+.git/
+bin/
+data/
+.env
+*.env
+*.test
+*.out
+.idea/
+.vscode/

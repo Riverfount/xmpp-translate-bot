@@ -10,6 +10,10 @@ xmpp-translate-bot
 .env
 *.env
 
+# Dados locais do InfluxDB2 do compose.yaml -- nunca versionar
+data/influxdb2/*
+!data/influxdb2/.gitkeep
+
 # Editor / SO
 .idea/
 .vscode/
