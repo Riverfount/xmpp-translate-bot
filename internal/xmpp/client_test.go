@@ -6,7 +6,11 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"gosrc.io/xmpp/stanza"
+
+	"github.com/Riverfount/xmpp-translate-bot/internal/observability"
 )
 
 func testLogger() *slog.Logger {
@@ -74,9 +78,45 @@ func TestJoinRooms_SendsPresenceForEachConfiguredRoom(t *testing.T) {
 func TestSendGroup_ErrorsWhenNotConnected(t *testing.T) {
 	t.Parallel()
 
-	c := New(Config{}, testLogger())
+	c := New(Config{}, testLogger(), observability.NewMetrics(prometheus.NewRegistry()))
 	if err := c.SendGroup("sala@conference.example", "oi"); err == nil {
 		t.Error("SendGroup() error = nil, want error when not connected")
+	}
+}
+
+func TestJoinRooms_FirstCallDoesNotCountAsReconnect(t *testing.T) {
+	t.Parallel()
+
+	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	c := &client{
+		cfg:     Config{Nickname: "tradutor"},
+		logger:  testLogger(),
+		metrics: metrics,
+	}
+
+	c.joinRooms(&fakeSender{})
+
+	if got := testutil.ToFloat64(metrics.XMPPReconnectsTotal); got != 0 {
+		t.Errorf("XMPPReconnectsTotal = %v, want 0 na primeira conexão", got)
+	}
+}
+
+func TestJoinRooms_SubsequentCallsCountAsReconnect(t *testing.T) {
+	t.Parallel()
+
+	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	c := &client{
+		cfg:     Config{Nickname: "tradutor"},
+		logger:  testLogger(),
+		metrics: metrics,
+	}
+
+	c.joinRooms(&fakeSender{}) // conexão inicial
+	c.joinRooms(&fakeSender{}) // reconexão 1
+	c.joinRooms(&fakeSender{}) // reconexão 2
+
+	if got := testutil.ToFloat64(metrics.XMPPReconnectsTotal); got != 2 {
+		t.Errorf("XMPPReconnectsTotal = %v, want 2", got)
 	}
 }
 

@@ -100,6 +100,17 @@ func TestFormatter_AlreadyTarget(t *testing.T) {
 	}
 }
 
+func TestFormatter_TextTooLong(t *testing.T) {
+	t.Parallel()
+
+	f := pipeline.Formatter{MaxTextLength: 5000}
+	got := f.TextTooLong()
+	want := "Texto muito longo (máximo 5000 caracteres)."
+	if got != want {
+		t.Errorf("TextTooLong() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatter_TranslateError(t *testing.T) {
 	t.Parallel()
 

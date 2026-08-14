@@ -40,6 +40,7 @@ type TranslationConfig struct {
 	DefaultTarget string         `yaml:"default_target"`
 	Pairs         []LanguagePair `yaml:"-"`
 	Detector      string         `yaml:"detector"`
+	MaxTextLength int            `yaml:"max_text_length"`
 }
 
 type PipelineConfig struct {
@@ -90,6 +91,7 @@ func defaults() *Config {
 		Translation: TranslationConfig{
 			DefaultTarget: "pt",
 			Detector:      "libretranslate",
+			MaxTextLength: 5000,
 		},
 		Pipeline: PipelineConfig{
 			Workers: 10,
@@ -216,6 +218,13 @@ func applyEnv(cfg *Config) error {
 	}
 	if v, ok := os.LookupEnv("DETECTOR"); ok {
 		cfg.Translation.Detector = v
+	}
+	if v, ok := os.LookupEnv("MAX_TEXT_LENGTH"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("config: MAX_TEXT_LENGTH inválido: %w", err)
+		}
+		cfg.Translation.MaxTextLength = n
 	}
 
 	if v, ok := os.LookupEnv("WORKER_POOL_SIZE"); ok {
