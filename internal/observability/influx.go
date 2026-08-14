@@ -116,7 +116,7 @@ func (w *InfluxWriter) send(evt TranslationEvent) {
 		w.metrics.InfluxWriteErrorsTotal.Inc()
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		w.logger.Warn("influx_write_failed", "status", resp.StatusCode)
