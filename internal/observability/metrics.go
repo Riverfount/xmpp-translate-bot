@@ -49,7 +49,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 
 		InfluxWriteErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "influx_write_errors_total",
-			Help: "Total de falhas ao escrever eventos no InfluxDB2 (extensão pós-spec).",
+			Help: "Total de falhas ao escrever eventos no InfluxDB2.",
 		}),
 	}
 
