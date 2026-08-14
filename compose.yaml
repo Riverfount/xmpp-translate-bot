@@ -16,13 +16,7 @@ services:
     depends_on:
       - influxdb2
 
-  # Instância local do InfluxDB2, só pra testar a extensão pós-spec (writer
-  # assíncrono de eventos de tradução) sem depender do isaCloud de produção.
-  # Referência de compose passada pelo parceiro que pediu essa extensão.
   influxdb2:
-    # Nome totalmente qualificado (não "influxdb:2.9") -- Podman rootless sem
-    # registries.conf configurado falha em resolver nomes curtos de imagem;
-    # Docker aceita os dois formatos igual.
     image: docker.io/library/influxdb:2.9
     container_name: influxdb2
     restart: unless-stopped
