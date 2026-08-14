@@ -1,11 +1,10 @@
 package pipeline_test
 
-// Este arquivo cobre, um a um, os cenários de aceitação que a spec técnica
-// (§12) lista como devendo virar teste de integração no pacote pipeline:
-// sucesso, timeout, 401, 429, idioma não suportado, e origem == destino
-// (BR-005) — sempre com Detector/Translator mockados, nunca o LibreTranslate
-// real. Cada teste corresponde a exatamente um cenário, pra rastreabilidade
-// direta entre requisito e teste.
+// Este arquivo cobre, um a um, os cenários de aceitação de tradução:
+// sucesso, timeout, 401, 429, idioma não suportado, e origem == destino —
+// sempre com Detector/Translator mockados, nunca o LibreTranslate real. Cada
+// teste corresponde a exatamente um cenário, pra rastreabilidade direta
+// entre comportamento esperado e teste.
 
 import (
 	"context"

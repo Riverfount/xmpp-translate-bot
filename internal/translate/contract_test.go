@@ -1,9 +1,9 @@
 package translate_test
 
 // Fixtures de contrato em testdata/ documentam o formato exato dos payloads
-// de /detect, /translate e /languages (spec técnica §8) como dados, não como
-// literais espalhados pelos testes — servem tanto pra verificar o que o
-// client envia quanto o que ele precisa saber parsear.
+// de /detect, /translate e /languages como dados, não como literais
+// espalhados pelos testes — servem tanto pra verificar o que o client envia
+// quanto o que ele precisa saber parsear.
 
 import (
 	"context"

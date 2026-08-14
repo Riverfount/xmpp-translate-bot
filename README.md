@@ -3,9 +3,9 @@
 Bot de tradução para salas XMPP (MUC), usando LibreTranslate self-hosted como
 backend de detecção de idioma e tradução.
 
-O projeto foi construído seguindo um plano de implementação faseado derivado
-da especificação técnica do produto (§16): fundação, XMPP mínimo, mention
-parser, client LibreTranslate, pipeline, resiliência, e empacotamento/deploy.
+O projeto foi construído em fases incrementais: fundação, XMPP mínimo,
+mention parser, client LibreTranslate, pipeline, resiliência, e
+empacotamento/deploy.
 
 ## Configuração
 
@@ -40,9 +40,9 @@ conectado ao XMPP + idiomas do LibreTranslate carregados) em `METRICS_ADDR`
 ### Subindo com compose (bot + InfluxDB2 local)
 
 `compose.yaml` sobe o bot e uma instância local do InfluxDB2 — só pra testar
-a extensão pós-spec (writer assíncrono de eventos de tradução) sem depender
-do isaCloud de produção. Compatível com `docker compose` e `podman compose`
-/ `podman-compose`.
+o writer assíncrono de eventos de tradução sem depender do isaCloud de
+produção. Compatível com `docker compose` e `podman compose` /
+`podman-compose`.
 
 ```
 cp .env.example .env   # preencha os valores

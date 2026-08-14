@@ -34,7 +34,7 @@ type Formatter struct {
 // ResolveTarget resolve o destino pra um texto detectado como lang: o
 // primeiro par explícito lang:X que casar (nessa ordem), senão
 // DefaultTarget. Quando o resultado é igual a lang, o texto já está no
-// idioma destino (BR-005) e não deve ser traduzido.
+// idioma destino e não deve ser traduzido.
 func (f Formatter) ResolveTarget(lang string) string {
 	for _, p := range f.Pairs {
 		if p.Source == lang {
@@ -54,7 +54,7 @@ func (f Formatter) Help() string {
 	return fmt.Sprintf("Use: @%s [sua mensagem]. Ex: @%s Hello world", f.Nickname, f.Nickname)
 }
 
-// AlreadyTarget formata o aviso da BR-005: o texto já está no idioma destino.
+// AlreadyTarget formata o aviso de que o texto já está no idioma destino.
 func (f Formatter) AlreadyTarget(target string) string {
 	return fmt.Sprintf("A mensagem já está em %s.", target)
 }
