@@ -3,8 +3,10 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -84,11 +86,30 @@ func (d *Dispatcher) worker(ctx context.Context) {
 			if !ok {
 				return
 			}
-			d.cfg.Metrics.WorkerPoolActive.Inc()
-			d.process(ctx, job)
-			d.cfg.Metrics.WorkerPoolActive.Dec()
+			d.runJob(ctx, job)
 		}
 	}
+}
+
+// runJob processa job isoladamente: um panic em qualquer etapa (Detector,
+// Translator, Formatter ou Responder são todos plugáveis via config) é
+// recuperado aqui e nunca derruba o worker nem o processo — falha em um job
+// nunca afeta outros.
+func (d *Dispatcher) runJob(ctx context.Context, job TranslationJob) {
+	d.cfg.Metrics.WorkerPoolActive.Inc()
+	defer d.cfg.Metrics.WorkerPoolActive.Dec()
+
+	defer func() {
+		if r := recover(); r != nil {
+			d.cfg.Logger.Error("job_panic",
+				"room", job.Room,
+				"panic", fmt.Sprint(r),
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+
+	d.process(ctx, job)
 }
 
 func (d *Dispatcher) process(ctx context.Context, job TranslationJob) {

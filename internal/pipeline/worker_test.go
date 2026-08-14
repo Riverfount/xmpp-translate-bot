@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +29,20 @@ type fakeDetector struct {
 
 func (f fakeDetector) Detect(context.Context, string) (string, float64, error) {
 	return f.lang, f.confidence, f.err
+}
+
+// flakyDetector panica na primeira chamada e funciona normalmente depois —
+// usado pra provar que o worker sobrevive a um panic e continua consumindo
+// a fila.
+type flakyDetector struct {
+	calls int32
+}
+
+func (f *flakyDetector) Detect(context.Context, string) (string, float64, error) {
+	if atomic.AddInt32(&f.calls, 1) == 1 {
+		panic("boom")
+	}
+	return "en", 0.9, nil
 }
 
 type fakeTranslator struct {
@@ -228,6 +243,41 @@ func TestDispatcher_QueueFullDropsJobWithoutBlocking(t *testing.T) {
 
 	if v := testutil.ToFloat64(metrics.QueueDroppedTotal); v != 1 {
 		t.Errorf("queue_dropped_total = %v, want 1", v)
+	}
+}
+
+func TestDispatcher_RecoversFromPanicAndKeepsProcessingNextJob(t *testing.T) {
+	t.Parallel()
+
+	responder := newSyncResponder()
+	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	d := pipeline.NewDispatcher(pipeline.DispatcherConfig{
+		Workers:    1,
+		QueueSize:  10,
+		Detector:   &flakyDetector{},
+		Translator: fakeTranslator{translated: "Olá"},
+		Responder:  responder,
+		Formatter:  pipeline.Formatter{Nickname: "tradutor", DefaultTarget: "pt"},
+		JobTimeout: time.Second,
+		Logger:     testLogger(),
+		Metrics:    metrics,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Start(ctx)
+
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "primeiro, panica no detect"})
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "segundo, processa normal"})
+
+	got := responder.awaitOne(t)
+	want := "Tradução (en → pt): Olá"
+	if got.body != want {
+		t.Errorf("body = %q, want %q (job seguinte ao panic deveria processar normalmente)", got.body, want)
+	}
+
+	if v := testutil.ToFloat64(metrics.WorkerPoolActive); v != 0 {
+		t.Errorf("worker_pool_active = %v, want 0 (Dec deve rodar mesmo com panic)", v)
 	}
 }
 
