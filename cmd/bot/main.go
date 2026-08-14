@@ -14,6 +14,8 @@ import (
 
 	"github.com/Riverfount/xmpp-translate-bot/internal/config"
 	"github.com/Riverfount/xmpp-translate-bot/internal/observability"
+	"github.com/Riverfount/xmpp-translate-bot/internal/pipeline"
+	"github.com/Riverfount/xmpp-translate-bot/internal/translate"
 	"github.com/Riverfount/xmpp-translate-bot/internal/xmpp"
 )
 
@@ -44,8 +46,9 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 
 	metrics := observability.NewMetrics(prometheus.NewRegistry())
 
+	var influxWriter *observability.InfluxWriter
 	if cfg.Influx.Enabled {
-		influxWriter := observability.NewInfluxWriter(observability.InfluxWriterConfig{
+		influxWriter = observability.NewInfluxWriter(observability.InfluxWriterConfig{
 			URL:       cfg.Influx.URL,
 			Org:       cfg.Influx.Org,
 			Bucket:    cfg.Influx.Bucket,
@@ -62,6 +65,14 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		"influx_enabled", cfg.Influx.Enabled,
 	)
 
+	ltTimeout := time.Duration(cfg.LibreTranslate.TimeoutMs) * time.Millisecond
+	ltClient := translate.NewClient(cfg.LibreTranslate.URL, cfg.LibreTranslate.APIKey, ltTimeout, cfg.LibreTranslate.MaxRetries, logger)
+
+	detector, err := translate.NewDetector(cfg.Translation.Detector, ltClient)
+	if err != nil {
+		return fmt.Errorf("translate: %w", err)
+	}
+
 	xc := newClient(xmpp.Config{
 		JID:      cfg.XMPP.JID,
 		Password: cfg.XMPP.Password,
@@ -71,23 +82,46 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		Nickname: cfg.XMPP.Nickname,
 	}, logger)
 
-	go echoIncoming(xc, logger)
+	dispatcher := pipeline.NewDispatcher(pipeline.DispatcherConfig{
+		Workers:    cfg.Pipeline.Workers,
+		QueueSize:  cfg.Pipeline.Queue,
+		Detector:   detector,
+		Translator: ltClient,
+		Responder:  xc,
+		Formatter: pipeline.Formatter{
+			Nickname:      cfg.XMPP.Nickname,
+			DefaultTarget: cfg.Translation.DefaultTarget,
+			Pairs:         cfg.Translation.Pairs,
+		},
+		JobTimeout: pipeline.JobTimeout(ltTimeout, cfg.LibreTranslate.MaxRetries),
+		Logger:     logger,
+		Metrics:    metrics,
+		Influx:     influxWriter,
+	})
+
+	go dispatcher.Start(ctx)
+	go dispatchIncoming(xc, cfg.XMPP.Nickname, dispatcher)
 
 	return xc.Start(ctx)
 }
 
-// echoIncoming ecoa mensagens recebidas de volta para a sala, validando o
-// caminho recepção→envio. Ignorar IsSelf é o que evita o loop de auto-eco.
-func echoIncoming(xc xmpp.Client, logger *slog.Logger) {
+// dispatchIncoming lê as mensagens recebidas nas salas, reconhece menções ao
+// bot e submete um TranslationJob por menção. Mensagens do próprio bot
+// (IsSelf) nunca chegam ao parser — é o que evita o loop de autotradução.
+func dispatchIncoming(xc xmpp.Client, nickname string, dispatcher *pipeline.Dispatcher) {
 	for msg := range xc.Incoming() {
-		logger.Info("message_received", "room", msg.Room, "from", msg.FromNick, "is_self", msg.IsSelf)
-		logger.Debug("message_body", "body", msg.Body)
-
-		if msg.IsSelf || msg.Body == "" {
+		if msg.IsSelf {
 			continue
 		}
-		if err := xc.SendGroup(msg.Room, msg.Body); err != nil {
-			logger.Error("echo_failed", "room", msg.Room, "error", err.Error())
+		parsed := xmpp.ParseMention(nickname, msg.Body)
+		if !parsed.Mentioned {
+			continue
 		}
+		dispatcher.Submit(pipeline.TranslationJob{
+			Room:       msg.Room,
+			From:       msg.FromNick,
+			Text:       parsed.Text,
+			ReceivedAt: msg.Timestamp,
+		})
 	}
 }
