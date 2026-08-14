@@ -40,7 +40,7 @@ type sentMessage struct {
 	room, body string
 }
 
-func newFakeXMPPClient(xmpp.Config, *slog.Logger) xmpp.Client {
+func newFakeXMPPClient(xmpp.Config, *slog.Logger, *observability.Metrics) xmpp.Client {
 	return &fakeXMPPClient{
 		incoming: make(chan xmpp.IncomingMessage),
 		sent:     make(chan sentMessage, 10),

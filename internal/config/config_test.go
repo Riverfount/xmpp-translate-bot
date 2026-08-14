@@ -37,6 +37,7 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 		{"LibreTranslate.MaxRetries", cfg.LibreTranslate.MaxRetries, 2},
 		{"Translation.DefaultTarget", cfg.Translation.DefaultTarget, "pt"},
 		{"Translation.Detector", cfg.Translation.Detector, "libretranslate"},
+		{"Translation.MaxTextLength", cfg.Translation.MaxTextLength, 5000},
 		{"Pipeline.Workers", cfg.Pipeline.Workers, 10},
 		{"Pipeline.Queue", cfg.Pipeline.Queue, 100},
 		{"Logging.Level", cfg.Logging.Level, "info"},
@@ -254,6 +255,7 @@ func TestLoad_InvalidNumericOrBoolEnv(t *testing.T) {
 		{"XMPP_TLS", "XMPP_TLS"},
 		{"LT_TIMEOUT_MS", "LT_TIMEOUT_MS"},
 		{"LT_MAX_RETRIES", "LT_MAX_RETRIES"},
+		{"MAX_TEXT_LENGTH", "MAX_TEXT_LENGTH"},
 		{"WORKER_POOL_SIZE", "WORKER_POOL_SIZE"},
 		{"QUEUE_SIZE", "QUEUE_SIZE"},
 		{"INFLUX_ENABLED", "INFLUX_ENABLED"},
@@ -270,6 +272,19 @@ func TestLoad_InvalidNumericOrBoolEnv(t *testing.T) {
 				t.Fatalf("Load() error = nil, want error for invalid %s", tt.env)
 			}
 		})
+	}
+}
+
+func TestLoad_MaxTextLengthEnvOverride(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("MAX_TEXT_LENGTH", "1000")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if cfg.Translation.MaxTextLength != 1000 {
+		t.Errorf("Translation.MaxTextLength = %d, want 1000", cfg.Translation.MaxTextLength)
 	}
 }
 

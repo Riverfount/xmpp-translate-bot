@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -222,6 +224,54 @@ func TestDispatcher_TranslateErrorRespondsWithMappedMessage(t *testing.T) {
 	}
 }
 
+func TestDispatcher_TextTooLongRejectsWithoutCallingTranslator(t *testing.T) {
+	t.Parallel()
+
+	responder := newSyncResponder()
+	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	d := pipeline.NewDispatcher(pipeline.DispatcherConfig{
+		Workers:    1,
+		QueueSize:  10,
+		Detector:   fakeDetector{err: errors.New("Detect não deveria ser chamado")},
+		Translator: fakeTranslator{err: errors.New("Translate não deveria ser chamado")},
+		Responder:  responder,
+		Formatter:  pipeline.Formatter{Nickname: "tradutor", DefaultTarget: "pt", MaxTextLength: 10},
+		JobTimeout: time.Second,
+		Logger:     testLogger(),
+		Metrics:    metrics,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Start(ctx)
+
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "isso aqui tem mais de dez caracteres"})
+
+	got := responder.awaitOne(t)
+	want := "Texto muito longo (máximo 10 caracteres)."
+	if got.body != want {
+		t.Errorf("body = %q, want %q", got.body, want)
+	}
+}
+
+func TestDispatcher_TextWithinLimitProceedsNormally(t *testing.T) {
+	t.Parallel()
+
+	responder := newSyncResponder()
+	d, _ := newTestDispatcher(t,
+		fakeDetector{lang: "en", confidence: 0.9},
+		fakeTranslator{translated: "Olá"},
+		responder,
+	)
+
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "Hello"})
+
+	got := responder.awaitOne(t)
+	if got.body != "Tradução (en → pt): Olá" {
+		t.Errorf("body = %q, texto dentro do limite não deveria ser rejeitado", got.body)
+	}
+}
+
 func TestDispatcher_QueueFullDropsJobWithoutBlocking(t *testing.T) {
 	t.Parallel()
 
@@ -278,6 +328,146 @@ func TestDispatcher_RecoversFromPanicAndKeepsProcessingNextJob(t *testing.T) {
 
 	if v := testutil.ToFloat64(metrics.WorkerPoolActive); v != 0 {
 		t.Errorf("worker_pool_active = %v, want 0 (Dec deve rodar mesmo com panic)", v)
+	}
+}
+
+func TestDispatcher_StopDrainsQueuedJobsWithinDeadline(t *testing.T) {
+	t.Parallel()
+
+	responder := newSyncResponder()
+	d, _ := newTestDispatcher(t,
+		fakeDetector{lang: "en", confidence: 0.9},
+		fakeTranslator{translated: "Olá"},
+		responder,
+	)
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "Hello"})
+	}
+
+	d.Stop(2 * time.Second)
+
+	for i := 0; i < n; i++ {
+		select {
+		case <-responder.sent:
+		default:
+			t.Fatalf("job %d não foi drenado antes do Stop retornar", i)
+		}
+	}
+}
+
+func TestDispatcher_StopRejectsSubmitAfterCalled(t *testing.T) {
+	t.Parallel()
+
+	responder := newSyncResponder()
+	d, _ := newTestDispatcher(t, fakeDetector{lang: "en"}, fakeTranslator{translated: "Olá"}, responder)
+
+	d.Stop(time.Second)
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "depois do shutdown"})
+
+	select {
+	case msg := <-responder.sent:
+		t.Fatalf("job submetido depois de Stop() não deveria ser processado: %+v", msg)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestDispatcher_StopReturnsAfterDeadlineEvenWithStuckJob(t *testing.T) {
+	t.Parallel()
+
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+
+	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	d := pipeline.NewDispatcher(pipeline.DispatcherConfig{
+		Workers:    1,
+		QueueSize:  10,
+		Detector:   blockingDetector{block: block},
+		Translator: fakeTranslator{},
+		Responder:  newSyncResponder(),
+		Formatter:  pipeline.Formatter{Nickname: "tradutor", DefaultTarget: "pt"},
+		JobTimeout: time.Minute,
+		Logger:     testLogger(),
+		Metrics:    metrics,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Start(ctx)
+
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "vai travar"})
+	time.Sleep(20 * time.Millisecond) // garante que o worker já pegou o job
+
+	start := time.Now()
+	d.Stop(50 * time.Millisecond)
+	elapsed := time.Since(start)
+
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("Stop() levou %v, want próximo de 50ms (não deveria esperar o job travado)", elapsed)
+	}
+}
+
+type blockingDetector struct {
+	block chan struct{}
+}
+
+func (b blockingDetector) Detect(ctx context.Context, _ string) (string, float64, error) {
+	select {
+	case <-b.block:
+	case <-ctx.Done():
+	}
+	return "", 0, ctx.Err()
+}
+
+func TestDispatcher_SlowInfluxEndpointDoesNotDelayJobResponse(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	influxWriter := observability.NewInfluxWriter(observability.InfluxWriterConfig{
+		URL:       srv.URL,
+		Org:       "org",
+		Bucket:    "bucket",
+		Token:     "token",
+		Timeout:   time.Second,
+		QueueSize: 10,
+	}, testLogger(), metrics)
+	t.Cleanup(influxWriter.Close)
+
+	responder := newSyncResponder()
+	d := pipeline.NewDispatcher(pipeline.DispatcherConfig{
+		Workers:    1,
+		QueueSize:  10,
+		Detector:   fakeDetector{lang: "en", confidence: 0.9},
+		Translator: fakeTranslator{translated: "Olá"},
+		Responder:  responder,
+		Formatter:  pipeline.Formatter{Nickname: "tradutor", DefaultTarget: "pt"},
+		JobTimeout: time.Second,
+		Logger:     testLogger(),
+		Metrics:    metrics,
+		Influx:     influxWriter,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Start(ctx)
+
+	start := time.Now()
+	d.Submit(pipeline.TranslationJob{Room: "sala@conf", Text: "Hello"})
+	got := responder.awaitOne(t)
+	elapsed := time.Since(start)
+
+	if got.body != "Tradução (en → pt): Olá" {
+		t.Errorf("body = %q", got.body)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("resposta levou %v, want bem menor que o delay do InfluxDB (300ms) — Enqueue não deveria bloquear o job", elapsed)
 	}
 }
 

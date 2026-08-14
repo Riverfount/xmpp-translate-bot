@@ -26,6 +26,9 @@ type Formatter struct {
 	Nickname      string
 	DefaultTarget string
 	Pairs         []config.LanguagePair
+	// MaxTextLength limita o tamanho (em caracteres) do texto aceito pra
+	// tradução. Zero desativa o limite.
+	MaxTextLength int
 }
 
 // ResolveTarget resolve o destino pra um texto detectado como lang: o
@@ -54,6 +57,11 @@ func (f Formatter) Help() string {
 // AlreadyTarget formata o aviso da BR-005: o texto já está no idioma destino.
 func (f Formatter) AlreadyTarget(target string) string {
 	return fmt.Sprintf("A mensagem já está em %s.", target)
+}
+
+// TextTooLong formata o aviso de texto acima de MaxTextLength.
+func (f Formatter) TextTooLong() string {
+	return fmt.Sprintf("Texto muito longo (máximo %d caracteres).", f.MaxTextLength)
 }
 
 // TranslateError mapeia um erro do Detector/Translator pra uma mensagem de

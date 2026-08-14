@@ -31,7 +31,11 @@ func main() {
 
 // newXMPPClient permite injetar uma implementação fake de xmpp.Client nos
 // testes, já que Start() faz conexão de rede real e não é barato de mockar.
-type newXMPPClient func(xmpp.Config, *slog.Logger) xmpp.Client
+type newXMPPClient func(xmpp.Config, *slog.Logger, *observability.Metrics) xmpp.Client
+
+// shutdownDrainTimeout limita quanto tempo o shutdown gracioso espera a fila
+// de jobs esvaziar antes de fechar a conexão XMPP e sair mesmo assim.
+const shutdownDrainTimeout = 10 * time.Second
 
 func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 	cfg, err := config.Load(os.Getenv("CONFIG_FILE"))
@@ -80,7 +84,7 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		TLS:      cfg.XMPP.TLS,
 		Rooms:    cfg.XMPP.Rooms,
 		Nickname: cfg.XMPP.Nickname,
-	}, logger)
+	}, logger, metrics)
 
 	dispatcher := pipeline.NewDispatcher(pipeline.DispatcherConfig{
 		Workers:    cfg.Pipeline.Workers,
@@ -92,6 +96,7 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 			Nickname:      cfg.XMPP.Nickname,
 			DefaultTarget: cfg.Translation.DefaultTarget,
 			Pairs:         cfg.Translation.Pairs,
+			MaxTextLength: cfg.Translation.MaxTextLength,
 		},
 		JobTimeout: pipeline.JobTimeout(ltTimeout, cfg.LibreTranslate.MaxRetries),
 		Logger:     logger,
@@ -99,10 +104,34 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		Influx:     influxWriter,
 	})
 
-	go dispatcher.Start(ctx)
+	// dispatcher.Start roda com um contexto próprio, nunca cancelado por
+	// sinal: o shutdown gracioso é conduzido por dispatcher.Stop (para de
+	// aceitar jobs, drena a fila dentro do deadline), não por cancelamento
+	// de contexto — assim um job em andamento no momento do SIGTERM não tem
+	// sua chamada ao LibreTranslate abortada no meio, só quando terminar (ou
+	// estourar o próprio JobTimeout) é que o processo segue pro próximo passo.
+	go dispatcher.Start(context.Background())
 	go dispatchIncoming(xc, cfg.XMPP.Nickname, dispatcher)
 
-	return xc.Start(ctx)
+	xmppCtx, cancelXMPP := context.WithCancel(context.Background())
+	defer cancelXMPP()
+
+	xmppErr := make(chan error, 1)
+	go func() { xmppErr <- xc.Start(xmppCtx) }()
+
+	select {
+	case <-ctx.Done():
+		// Shutdown gracioso: para de aceitar jobs novos e drena a fila
+		// dentro do deadline antes de fechar a conexão XMPP — só assim uma
+		// tradução em andamento ainda consegue responder na sala.
+		dispatcher.Stop(shutdownDrainTimeout)
+		cancelXMPP()
+		return <-xmppErr
+	case err := <-xmppErr:
+		// XMPP caiu sozinho (erro fatal de conexão), sem sinal de shutdown.
+		dispatcher.Stop(shutdownDrainTimeout)
+		return err
+	}
 }
 
 // dispatchIncoming lê as mensagens recebidas nas salas, reconhece menções ao

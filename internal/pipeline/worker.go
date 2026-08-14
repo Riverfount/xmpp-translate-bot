@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Riverfount/xmpp-translate-bot/internal/observability"
 	"github.com/Riverfount/xmpp-translate-bot/internal/translate"
@@ -41,6 +42,18 @@ type Dispatcher struct {
 	cfg  DispatcherConfig
 	jobs chan TranslationJob
 	wg   sync.WaitGroup
+	// done é fechado por Start quando todos os workers já saíram — único
+	// lugar que chama wg.Wait(); Stop só observa done, nunca chama Wait()
+	// ele mesmo (chamar Wait() de dois lugares concorrentes é o clássico
+	// mau uso de sync.WaitGroup: um Add() que chega depois de um Wait() já
+	// ter retornado é indefinido, e o -race pega isso).
+	done chan struct{}
+
+	// mu protege stopped: Submit toma RLock (permite múltiplos submits
+	// concorrentes), Stop toma Lock exclusivo antes de fechar jobs, o que
+	// evita o clássico "send on closed channel" entre as duas.
+	mu      sync.RWMutex
+	stopped bool
 }
 
 // NewDispatcher cria um Dispatcher com fila bufferizada em cfg.QueueSize.
@@ -49,30 +62,65 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	return &Dispatcher{
 		cfg:  cfg,
 		jobs: make(chan TranslationJob, cfg.QueueSize),
+		done: make(chan struct{}),
 	}
 }
 
-// Start sobe cfg.Workers goroutines consumindo a fila e bloqueia até ctx ser
-// cancelado, quando os workers em andamento terminam o job atual e saem —
-// jobs ainda na fila são abandonados (drenar dentro de um deadline é escopo
-// de uma fase futura de resiliência).
+// Start sobe cfg.Workers goroutines consumindo a fila e bloqueia até todas
+// saírem — o que acontece quando ctx é cancelado (parada imediata, abandona
+// o que sobrar na fila) ou quando Stop fecha a fila (parada graciosa, com
+// deadline de drain). ctx não afeta o contexto de um job individual — cada
+// job só é limitado pelo seu próprio JobTimeout, justamente pra sobreviver a
+// um shutdown gracioso em andamento.
 func (d *Dispatcher) Start(ctx context.Context) {
 	for i := 0; i < d.cfg.Workers; i++ {
 		d.wg.Add(1)
 		go d.worker(ctx)
 	}
 	d.wg.Wait()
+	close(d.done)
 }
 
 // Submit enfileira job pra processamento. Nunca bloqueia: se a fila estiver
 // cheia, descarta o job e loga queue_full em vez de atrasar a leitura de
-// novas mensagens do XMPP.
+// novas mensagens do XMPP. Depois de Stop, novos jobs são rejeitados.
 func (d *Dispatcher) Submit(job TranslationJob) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.stopped {
+		d.cfg.Logger.Warn("job_rejected_shutting_down", "room", job.Room)
+		return
+	}
+
 	select {
 	case d.jobs <- job:
 	default:
 		d.cfg.Logger.Warn("queue_full", "room", job.Room)
 		d.cfg.Metrics.QueueDroppedTotal.Inc()
+	}
+}
+
+// Stop para de aceitar novos jobs (Submit passa a rejeitar) e fecha a fila,
+// deixando os workers ativos drenarem o que já foi enfileirado. Bloqueia até
+// a fila esvaziar ou drainTimeout esgotar, o que vier primeiro — depois do
+// deadline, workers ainda ocupados são abandonados (a chamada retorna, mas
+// eles continuam rodando até terminar ou o processo sair). Chamar Stop mais
+// de uma vez não tem efeito depois da primeira.
+func (d *Dispatcher) Stop(drainTimeout time.Duration) {
+	d.mu.Lock()
+	if d.stopped {
+		d.mu.Unlock()
+		return
+	}
+	d.stopped = true
+	close(d.jobs)
+	d.mu.Unlock()
+
+	select {
+	case <-d.done:
+	case <-time.After(drainTimeout):
+		d.cfg.Logger.Warn("shutdown_drain_timeout", "timeout", drainTimeout.String())
 	}
 }
 
@@ -117,6 +165,12 @@ func (d *Dispatcher) process(ctx context.Context, job TranslationJob) {
 
 	if job.Text == "" {
 		d.respond(job.Room, d.cfg.Formatter.Help())
+		return
+	}
+
+	if max := d.cfg.Formatter.MaxTextLength; max > 0 && utf8.RuneCountInString(job.Text) > max {
+		d.cfg.Logger.Info("text_too_long", "room", job.Room, "length", utf8.RuneCountInString(job.Text))
+		d.respond(job.Room, d.cfg.Formatter.TextTooLong())
 		return
 	}
 

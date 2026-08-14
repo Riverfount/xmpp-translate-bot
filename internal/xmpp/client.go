@@ -12,6 +12,8 @@ import (
 
 	fluux "gosrc.io/xmpp"
 	"gosrc.io/xmpp/stanza"
+
+	"github.com/Riverfount/xmpp-translate-bot/internal/observability"
 )
 
 // Client é o contrato de conexão com o servidor XMPP.
@@ -49,15 +51,22 @@ const incomingBuffer = 32
 type client struct {
 	cfg      Config
 	logger   *slog.Logger
+	metrics  *observability.Metrics
 	incoming chan IncomingMessage
 	xc       *fluux.Client
+
+	// connectCount conta quantas vezes joinRooms rodou: a primeira é a
+	// conexão inicial, as seguintes são reconexões (StreamManager.resume).
+	// Só é tocado a partir de joinRooms, que a lib nunca chama concorrentemente.
+	connectCount int
 }
 
 // New cria um Client XMPP. A conexão real só ocorre em Start.
-func New(cfg Config, logger *slog.Logger) Client {
+func New(cfg Config, logger *slog.Logger, metrics *observability.Metrics) Client {
 	return &client{
 		cfg:      cfg,
 		logger:   logger,
+		metrics:  metrics,
 		incoming: make(chan IncomingMessage, incomingBuffer),
 	}
 }
@@ -123,6 +132,14 @@ func (c *client) Start(ctx context.Context) error {
 }
 
 func (c *client) joinRooms(s fluux.Sender) {
+	c.connectCount++
+	if c.connectCount == 1 {
+		c.logger.Info("xmpp_connected")
+	} else {
+		c.logger.Info("xmpp_reconnected", "attempt", c.connectCount-1)
+		c.metrics.XMPPReconnectsTotal.Inc()
+	}
+
 	for _, room := range c.cfg.Rooms {
 		presence := stanza.Presence{
 			Attrs: stanza.Attrs{To: room + "/" + c.cfg.Nickname},
