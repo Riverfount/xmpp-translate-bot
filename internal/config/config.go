@@ -55,9 +55,8 @@ type MetricsConfig struct {
 	Addr string `yaml:"addr"`
 }
 
-// InfluxConfig configura o writer assíncrono de métricas para InfluxDB2
-// (extensão pós-spec, pedido de parceiro/isaCloud). Desabilitado por padrão:
-// só exige URL/Org/Bucket/Token quando Enabled=true.
+// InfluxConfig configura o writer assíncrono de métricas para InfluxDB2.
+// Desabilitado por padrão: só exige URL/Org/Bucket/Token quando Enabled=true.
 type InfluxConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	URL       string `yaml:"url"`

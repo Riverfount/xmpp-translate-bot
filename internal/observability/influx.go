@@ -11,8 +11,7 @@ import (
 )
 
 // TranslationEvent é o evento de uma tradução (sucesso ou erro) enviado ao
-// InfluxDB2. Extensão pós-spec (pedido de parceiro, isaCloud) — sink de
-// observabilidade adicional ao Prometheus, não o substitui.
+// InfluxDB2 — sink de observabilidade adicional ao Prometheus, não o substitui.
 type TranslationEvent struct {
 	SrcLang  string
 	DstLang  string
@@ -84,9 +83,7 @@ func (w *InfluxWriter) Enqueue(evt TranslationEvent) {
 	}
 }
 
-// Close para de aceitar processamento novo e espera a fila esvaziar (drena o
-// que já foi enfileirado) antes de retornar — usado tanto em testes quanto
-// no graceful shutdown do bot.
+// Close para de aceitar eventos novos e bloqueia até a fila esvaziar.
 func (w *InfluxWriter) Close() {
 	close(w.queue)
 	<-w.done

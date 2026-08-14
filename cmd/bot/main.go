@@ -19,9 +19,6 @@ func main() {
 	}
 }
 
-// run carrega e valida a config, prepara logging/métricas/writer do
-// InfluxDB (fundação da Fase 1) e loga o startup. w recebe os logs
-// estruturados (os.Stdout em produção, um buffer em teste).
 func run(w io.Writer) error {
 	cfg, err := config.Load(os.Getenv("CONFIG_FILE"))
 	if err != nil {

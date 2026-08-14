@@ -2,8 +2,7 @@ package observability
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// Metrics agrupa as métricas Prometheus do bot (spec §10.2) mais a métrica de
-// erro do writer InfluxDB (extensão pós-spec, §6 do plano de implementação).
+// Metrics agrupa as métricas Prometheus do bot, incluindo o writer InfluxDB2.
 type Metrics struct {
 	TranslationsTotal         *prometheus.CounterVec
 	TranslationLatencySeconds *prometheus.HistogramVec
