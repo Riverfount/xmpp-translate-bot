@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/Riverfount/xmpp-translate-bot/internal/xmpp"
 )
 
 func setRequiredEnv(t *testing.T) {
@@ -17,10 +21,34 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("LT_API_KEY", "lt-key")
 }
 
+// fakeXMPPClient evita que os testes de run() dependam de uma conexão XMPP
+// real: Start() só bloqueia até ctx ser cancelado, como o client de verdade
+// faria ao ser desligado.
+type fakeXMPPClient struct {
+	incoming chan xmpp.IncomingMessage
+}
+
+func newFakeXMPPClient(xmpp.Config, *slog.Logger) xmpp.Client {
+	return &fakeXMPPClient{incoming: make(chan xmpp.IncomingMessage)}
+}
+
+func (f *fakeXMPPClient) Start(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (f *fakeXMPPClient) SendGroup(string, string) error {
+	return nil
+}
+
+func (f *fakeXMPPClient) Incoming() <-chan xmpp.IncomingMessage {
+	return f.incoming
+}
+
 func TestRun_FailsFastWithInvalidConfig(t *testing.T) {
 	// Nenhuma variável obrigatória setada.
 	var out bytes.Buffer
-	if err := run(&out); err == nil {
+	if err := run(context.Background(), &out, newFakeXMPPClient); err == nil {
 		t.Fatal("run() error = nil, want error for missing required config")
 	}
 }
@@ -28,8 +56,11 @@ func TestRun_FailsFastWithInvalidConfig(t *testing.T) {
 func TestRun_SucceedsAndLogsStartupWithValidConfig(t *testing.T) {
 	setRequiredEnv(t)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	var out bytes.Buffer
-	if err := run(&out); err != nil {
+	if err := run(ctx, &out, newFakeXMPPClient); err != nil {
 		t.Fatalf("run() error = %v, want nil", err)
 	}
 
@@ -56,8 +87,11 @@ func TestRun_WithInfluxEnabledCreatesWriterWithoutError(t *testing.T) {
 	t.Setenv("INFLUX_BUCKET", "bucket")
 	t.Setenv("INFLUX_TOKEN", "tok")
 
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	var out bytes.Buffer
-	if err := run(&out); err != nil {
+	if err := run(ctx, &out, newFakeXMPPClient); err != nil {
 		t.Fatalf("run() error = %v, want nil", err)
 	}
 }
