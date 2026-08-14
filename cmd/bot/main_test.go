@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/Riverfount/xmpp-translate-bot/internal/observability"
+	"github.com/Riverfount/xmpp-translate-bot/internal/pipeline"
 	"github.com/Riverfount/xmpp-translate-bot/internal/xmpp"
 )
 
@@ -23,21 +29,32 @@ func setRequiredEnv(t *testing.T) {
 
 // fakeXMPPClient evita que os testes de run() dependam de uma conexão XMPP
 // real: Start() só bloqueia até ctx ser cancelado, como o client de verdade
-// faria ao ser desligado.
+// faria ao ser desligado. SendGroup registra cada envio em sent, pra testar
+// o wiring de dispatchIncoming sem precisar de uma sala de verdade.
 type fakeXMPPClient struct {
 	incoming chan xmpp.IncomingMessage
+	sent     chan sentMessage
+}
+
+type sentMessage struct {
+	room, body string
 }
 
 func newFakeXMPPClient(xmpp.Config, *slog.Logger) xmpp.Client {
-	return &fakeXMPPClient{incoming: make(chan xmpp.IncomingMessage)}
+	return &fakeXMPPClient{
+		incoming: make(chan xmpp.IncomingMessage),
+		sent:     make(chan sentMessage, 10),
+	}
 }
 
 func (f *fakeXMPPClient) Start(ctx context.Context) error {
 	<-ctx.Done()
+	close(f.incoming)
 	return nil
 }
 
-func (f *fakeXMPPClient) SendGroup(string, string) error {
+func (f *fakeXMPPClient) SendGroup(room, body string) error {
+	f.sent <- sentMessage{room, body}
 	return nil
 }
 
@@ -93,5 +110,99 @@ func TestRun_WithInfluxEnabledCreatesWriterWithoutError(t *testing.T) {
 	var out bytes.Buffer
 	if err := run(ctx, &out, newFakeXMPPClient); err != nil {
 		t.Fatalf("run() error = %v, want nil", err)
+	}
+}
+
+type stubDetector struct{ lang string }
+
+func (d stubDetector) Detect(context.Context, string) (string, float64, error) {
+	return d.lang, 0.9, nil
+}
+
+type stubTranslator struct{ translated string }
+
+func (t stubTranslator) Translate(context.Context, string, string, string) (string, error) {
+	return t.translated, nil
+}
+
+func (t stubTranslator) SupportedLanguages(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func newTestDispatcher(responder pipeline.Responder) *pipeline.Dispatcher {
+	return pipeline.NewDispatcher(pipeline.DispatcherConfig{
+		Workers:    1,
+		QueueSize:  1,
+		Detector:   stubDetector{lang: "en"},
+		Translator: stubTranslator{translated: "Olá"},
+		Responder:  responder,
+		Formatter:  pipeline.Formatter{Nickname: "tradutor", DefaultTarget: "pt"},
+		JobTimeout: time.Second,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Metrics:    observability.NewMetrics(prometheus.NewRegistry()),
+	})
+}
+
+func TestDispatchIncoming_MentionedMessageReachesResponder(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeXMPPClient{incoming: make(chan xmpp.IncomingMessage, 1), sent: make(chan sentMessage, 1)}
+	dispatcher := newTestDispatcher(fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dispatcher.Start(ctx)
+	go dispatchIncoming(fake, "tradutor", dispatcher)
+
+	fake.incoming <- xmpp.IncomingMessage{Room: "sala@conf", FromNick: "alice", Body: "@tradutor Hello"}
+
+	select {
+	case msg := <-fake.sent:
+		want := "Tradução (en → pt): Olá"
+		if msg.room != "sala@conf" || msg.body != want {
+			t.Errorf("got %+v, want room=sala@conf body=%q", msg, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout esperando resposta do dispatcher")
+	}
+}
+
+func TestDispatchIncoming_IgnoresSelfMessages(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeXMPPClient{incoming: make(chan xmpp.IncomingMessage, 1), sent: make(chan sentMessage, 1)}
+	dispatcher := newTestDispatcher(fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dispatcher.Start(ctx)
+	go dispatchIncoming(fake, "tradutor", dispatcher)
+
+	fake.incoming <- xmpp.IncomingMessage{Room: "sala@conf", FromNick: "tradutor", Body: "@tradutor eco", IsSelf: true}
+
+	select {
+	case msg := <-fake.sent:
+		t.Fatalf("envio inesperado para mensagem própria: %+v", msg)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestDispatchIncoming_IgnoresNonMentions(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeXMPPClient{incoming: make(chan xmpp.IncomingMessage, 1), sent: make(chan sentMessage, 1)}
+	dispatcher := newTestDispatcher(fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dispatcher.Start(ctx)
+	go dispatchIncoming(fake, "tradutor", dispatcher)
+
+	fake.incoming <- xmpp.IncomingMessage{Room: "sala@conf", FromNick: "alice", Body: "hello sem menção"}
+
+	select {
+	case msg := <-fake.sent:
+		t.Fatalf("envio inesperado para mensagem sem menção: %+v", msg)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
