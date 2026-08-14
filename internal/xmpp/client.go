@@ -52,6 +52,7 @@ type client struct {
 	cfg      Config
 	logger   *slog.Logger
 	metrics  *observability.Metrics
+	health   *observability.Health
 	incoming chan IncomingMessage
 	xc       *fluux.Client
 
@@ -62,11 +63,12 @@ type client struct {
 }
 
 // New cria um Client XMPP. A conexão real só ocorre em Start.
-func New(cfg Config, logger *slog.Logger, metrics *observability.Metrics) Client {
+func New(cfg Config, logger *slog.Logger, metrics *observability.Metrics, health *observability.Health) Client {
 	return &client{
 		cfg:      cfg,
 		logger:   logger,
 		metrics:  metrics,
+		health:   health,
 		incoming: make(chan IncomingMessage, incomingBuffer),
 	}
 }
@@ -139,6 +141,7 @@ func (c *client) joinRooms(s fluux.Sender) {
 		c.logger.Info("xmpp_reconnected", "attempt", c.connectCount-1)
 		c.metrics.XMPPReconnectsTotal.Inc()
 	}
+	c.health.SetXMPPConnected(true)
 
 	for _, room := range c.cfg.Rooms {
 		presence := stanza.Presence{
@@ -171,4 +174,5 @@ func (c *client) handleMessage(_ fluux.Sender, p stanza.Packet) {
 
 func (c *client) handleError(err error) {
 	c.logger.Warn("xmpp_error", "error", err.Error())
+	c.health.SetXMPPConnected(false)
 }

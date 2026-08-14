@@ -25,6 +25,9 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("XMPP_ROOMS", "sala@conference.server.example")
 	t.Setenv("LT_URL", "http://lt.internal:5000")
 	t.Setenv("LT_API_KEY", "lt-key")
+	// :0 pede uma porta livre ao SO -- evita colidir com outro teste (ou com
+	// um :9090 já ocupado na máquina) bindando a porta fixa de METRICS_ADDR.
+	t.Setenv("METRICS_ADDR", ":0")
 }
 
 // fakeXMPPClient evita que os testes de run() dependam de uma conexão XMPP
@@ -40,7 +43,7 @@ type sentMessage struct {
 	room, body string
 }
 
-func newFakeXMPPClient(xmpp.Config, *slog.Logger, *observability.Metrics) xmpp.Client {
+func newFakeXMPPClient(xmpp.Config, *slog.Logger, *observability.Metrics, *observability.Health) xmpp.Client {
 	return &fakeXMPPClient{
 		incoming: make(chan xmpp.IncomingMessage),
 		sent:     make(chan sentMessage, 10),

@@ -2,6 +2,7 @@ package xmpp
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -43,6 +44,7 @@ func TestJoinRooms_SendsPresenceForEachConfiguredRoom(t *testing.T) {
 			Nickname: "tradutor",
 		},
 		logger: testLogger(),
+		health: observability.NewHealth(),
 	}
 
 	fake := &fakeSender{}
@@ -78,9 +80,46 @@ func TestJoinRooms_SendsPresenceForEachConfiguredRoom(t *testing.T) {
 func TestSendGroup_ErrorsWhenNotConnected(t *testing.T) {
 	t.Parallel()
 
-	c := New(Config{}, testLogger(), observability.NewMetrics(prometheus.NewRegistry()))
+	c := New(Config{}, testLogger(), observability.NewMetrics(prometheus.NewRegistry()), observability.NewHealth())
 	if err := c.SendGroup("sala@conference.example", "oi"); err == nil {
 		t.Error("SendGroup() error = nil, want error when not connected")
+	}
+}
+
+func TestJoinRooms_SetsXMPPConnected(t *testing.T) {
+	t.Parallel()
+
+	health := observability.NewHealth()
+	c := &client{
+		cfg:    Config{Nickname: "tradutor"},
+		logger: testLogger(),
+		health: health,
+	}
+
+	c.joinRooms(&fakeSender{})
+
+	connected, _ := health.Ready()
+	if !connected {
+		t.Error("health.Ready() xmppConnected = false, want true depois de joinRooms")
+	}
+}
+
+func TestHandleError_SetsXMPPConnectedFalse(t *testing.T) {
+	t.Parallel()
+
+	health := observability.NewHealth()
+	health.SetXMPPConnected(true)
+	c := &client{
+		cfg:    Config{Nickname: "tradutor"},
+		logger: testLogger(),
+		health: health,
+	}
+
+	c.handleError(errors.New("conexão perdida"))
+
+	connected, _ := health.Ready()
+	if connected {
+		t.Error("health.Ready() xmppConnected = true, want false depois de handleError")
 	}
 }
 
@@ -92,6 +131,7 @@ func TestJoinRooms_FirstCallDoesNotCountAsReconnect(t *testing.T) {
 		cfg:     Config{Nickname: "tradutor"},
 		logger:  testLogger(),
 		metrics: metrics,
+		health:  observability.NewHealth(),
 	}
 
 	c.joinRooms(&fakeSender{})
@@ -109,6 +149,7 @@ func TestJoinRooms_SubsequentCallsCountAsReconnect(t *testing.T) {
 		cfg:     Config{Nickname: "tradutor"},
 		logger:  testLogger(),
 		metrics: metrics,
+		health:  observability.NewHealth(),
 	}
 
 	c.joinRooms(&fakeSender{}) // conexão inicial

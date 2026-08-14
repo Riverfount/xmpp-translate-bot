@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,11 +33,15 @@ func main() {
 
 // newXMPPClient permite injetar uma implementação fake de xmpp.Client nos
 // testes, já que Start() faz conexão de rede real e não é barato de mockar.
-type newXMPPClient func(xmpp.Config, *slog.Logger, *observability.Metrics) xmpp.Client
+type newXMPPClient func(xmpp.Config, *slog.Logger, *observability.Metrics, *observability.Health) xmpp.Client
 
 // shutdownDrainTimeout limita quanto tempo o shutdown gracioso espera a fila
 // de jobs esvaziar antes de fechar a conexão XMPP e sair mesmo assim.
 const shutdownDrainTimeout = 10 * time.Second
+
+// metricsServerShutdownTimeout limita quanto tempo o servidor HTTP de
+// /metrics, /healthz e /readyz espera requisições em andamento terminarem.
+const metricsServerShutdownTimeout = 5 * time.Second
 
 func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 	cfg, err := config.Load(os.Getenv("CONFIG_FILE"))
@@ -48,7 +54,21 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		return fmt.Errorf("logging: %w", err)
 	}
 
-	metrics := observability.NewMetrics(prometheus.NewRegistry())
+	registry := prometheus.NewRegistry()
+	metrics := observability.NewMetrics(registry)
+	health := observability.NewHealth()
+
+	metricsServer := observability.NewServer(cfg.Metrics.Addr, registry, health)
+	go func() {
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics_server_failed", "error", err.Error())
+		}
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), metricsServerShutdownTimeout)
+		defer cancel()
+		_ = metricsServer.Shutdown(shutdownCtx)
+	}()
 
 	var influxWriter *observability.InfluxWriter
 	if cfg.Influx.Enabled {
@@ -77,6 +97,31 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		return fmt.Errorf("translate: %w", err)
 	}
 
+	// Busca /languages uma vez no boot, em paralelo com a conexão XMPP (são
+	// operações independentes) — só sinaliza readiness, não bloqueia o resto
+	// do bootstrap nem é reagendada se falhar (retry fica pra quando alguém
+	// precisar da validação de idioma de fato, não só do sinal de /readyz).
+	// bgCancel aborta essa busca (em vez de deixá-la seguir seu próprio
+	// timeout) e langDone garante que run() só devolve o controle depois que
+	// ela parar de rodar — sem isso, a goroutine pode logar depois que o
+	// chamador (ou um teste) já inspecionou a saída, uma race de verdade.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	langDone := make(chan struct{})
+	go func() {
+		defer close(langDone)
+		langCtx, cancel := context.WithTimeout(bgCtx, pipeline.JobTimeout(ltTimeout, cfg.LibreTranslate.MaxRetries))
+		defer cancel()
+		if _, err := ltClient.SupportedLanguages(langCtx); err != nil {
+			logger.Warn("languages_fetch_failed", "error", err.Error())
+			return
+		}
+		health.SetLanguagesReady(true)
+	}()
+	defer func() {
+		bgCancel()
+		<-langDone
+	}()
+
 	xc := newClient(xmpp.Config{
 		JID:      cfg.XMPP.JID,
 		Password: cfg.XMPP.Password,
@@ -84,7 +129,7 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		TLS:      cfg.XMPP.TLS,
 		Rooms:    cfg.XMPP.Rooms,
 		Nickname: cfg.XMPP.Nickname,
-	}, logger, metrics)
+	}, logger, metrics, health)
 
 	dispatcher := pipeline.NewDispatcher(pipeline.DispatcherConfig{
 		Workers:    cfg.Pipeline.Workers,
