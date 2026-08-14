@@ -1,0 +1,16 @@
+# Binários
+/bin/
+xmpp-translate-bot
+/bot
+*.exe
+*.test
+*.out
+
+# Config local com segredos
+.env
+*.env
+
+# Editor / SO
+.idea/
+.vscode/
+.DS_Store

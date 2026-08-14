@@ -1,0 +1,30 @@
+# Configuração de exemplo.
+# Segredos (senha XMPP, API key do LibreTranslate) NÃO vão aqui — apenas via
+# variáveis de ambiente (XMPP_PASSWORD, LT_API_KEY).
+
+xmpp:
+  jid: ""
+  server: ""
+  tls: true
+  rooms: []
+  nickname: "tradutor"
+
+libretranslate:
+  url: ""
+  timeout_ms: 5000
+  max_retries: 2
+
+translation:
+  default_target: "pt"
+  pairs: []
+  detector: "libretranslate"
+
+pipeline:
+  workers: 10
+  queue: 100
+
+logging:
+  level: "info"
+
+metrics:
+  addr: ":9090"
