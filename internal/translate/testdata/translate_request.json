@@ -1,0 +1,7 @@
+{
+  "q": "Hello, how are you?",
+  "source": "en",
+  "target": "pt",
+  "format": "text",
+  "api_key": "test-key"
+}
