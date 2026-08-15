@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/Riverfount/xmpp-translate-bot/internal/config"
+	"github.com/Riverfount/xmpp-translate-bot/internal/lookup"
 	"github.com/Riverfount/xmpp-translate-bot/internal/observability"
 	"github.com/Riverfount/xmpp-translate-bot/internal/pipeline"
 	"github.com/Riverfount/xmpp-translate-bot/internal/translate"
@@ -83,11 +84,42 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		defer influxWriter.Close()
 	}
 
+	var wikiLooker lookup.Looker
+	if cfg.Wiki.Enabled {
+		wikiLooker = lookup.NewMediaWiki(lookup.MediaWikiConfig{
+			Host:            cfg.Wiki.Host,
+			Lang:            cfg.Wiki.Lang,
+			UserAgent:       cfg.Wiki.UserAgent,
+			MaxExtractChars: cfg.Wiki.MaxExtractChars,
+			Timeout:         time.Duration(cfg.Wiki.TimeoutMs) * time.Millisecond,
+			MaxRetries:      cfg.Wiki.MaxRetries,
+		})
+	}
+
+	// O dataset de emoji é carregado no boot: se o arquivo apontado estiver
+	// quebrado, o processo não sobe — mesma política fail-fast da config.
+	var emojiLooker lookup.Looker
+	if cfg.Emoji.Enabled {
+		store, err := lookup.NewEmojiStore(lookup.EmojiConfig{
+			DataFile:   cfg.Emoji.DataFile,
+			MaxResults: cfg.Emoji.MaxResults,
+			Lang:       cfg.Emoji.Lang,
+		})
+		if err != nil {
+			return fmt.Errorf("carregando dataset de emoji: %w", err)
+		}
+		emojiLooker = store
+	}
+
 	logger.Info("bot_starting",
 		"rooms", cfg.XMPP.Rooms,
 		"detector", cfg.Translation.Detector,
 		"influx_enabled", cfg.Influx.Enabled,
+		"wiki_enabled", cfg.Wiki.Enabled,
+		"emoji_enabled", cfg.Emoji.Enabled,
 	)
+
+	logger.Info("emoji_dataset_loaded", "count", emojiLooker.(*lookup.EmojiStore).Count(), "lang", cfg.Emoji.Lang, "max_results", cfg.Emoji.MaxResults)
 
 	ltTimeout := time.Duration(cfg.LibreTranslate.TimeoutMs) * time.Millisecond
 	ltClient := translate.NewClient(cfg.LibreTranslate.URL, cfg.LibreTranslate.APIKey, ltTimeout, cfg.LibreTranslate.MaxRetries, logger)
@@ -136,6 +168,8 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		QueueSize:  cfg.Pipeline.Queue,
 		Detector:   detector,
 		Translator: ltClient,
+		Wiki:       wikiLooker,
+		Emoji:      emojiLooker,
 		Responder:  xc,
 		Formatter: pipeline.Formatter{
 			Nickname:      cfg.XMPP.Nickname,

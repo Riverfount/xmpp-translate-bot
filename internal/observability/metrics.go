@@ -11,6 +11,8 @@ type Metrics struct {
 	QueueDroppedTotal         prometheus.Counter
 	WorkerPoolActive          prometheus.Gauge
 	InfluxWriteErrorsTotal    prometheus.Counter
+	LookupsTotal              *prometheus.CounterVec
+	LookupLatencySeconds      *prometheus.HistogramVec
 }
 
 // NewMetrics cria e registra todas as métricas do bot em reg.
@@ -51,6 +53,21 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "influx_write_errors_total",
 			Help: "Total de falhas ao escrever eventos no InfluxDB2.",
 		}),
+		LookupsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "lookups_total",
+				Help: "Consultas por comando e resultado.",
+			},
+			[]string{"command", "status"},
+		),
+		LookupLatencySeconds: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "lookup_latency_seconds",
+				Help:    "Latência de consultas por comando e resultado.",
+				Buckets: prometheus.DefBuckets,
+			},
+			[]string{"command", "status"},
+		),
 	}
 
 	reg.MustRegister(
@@ -61,6 +78,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.QueueDroppedTotal,
 		m.WorkerPoolActive,
 		m.InfluxWriteErrorsTotal,
+		m.LookupsTotal,
+		m.LookupLatencySeconds,
 	)
 
 	return m

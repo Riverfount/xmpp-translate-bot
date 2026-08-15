@@ -68,6 +68,25 @@ type InfluxConfig struct {
 	QueueSize int    `yaml:"queue_size"`
 }
 
+type WikiConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Host            string `yaml:"host"`
+	Lang            string `yaml:"lang"`
+	UserAgent       string `yaml:"user_agent"`
+	MaxExtractChars int    `yaml:"max_extract_chars"`
+	TimeoutMs       int    `yaml:"timeout_ms"`
+	MaxRetries      int    `yaml:"max_retries"`
+}
+
+// EmojiConfig configura o comando !emoji. DataFile vazio usa o dataset
+// embutido no binário.
+type EmojiConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	DataFile   string `yaml:"data_file"`
+	MaxResults int    `yaml:"max_results"`
+	Lang       string `yaml:"lang"`
+}
+
 type Config struct {
 	XMPP           XMPPConfig           `yaml:"xmpp"`
 	LibreTranslate LibreTranslateConfig `yaml:"libretranslate"`
@@ -76,6 +95,8 @@ type Config struct {
 	Logging        LoggingConfig        `yaml:"logging"`
 	Metrics        MetricsConfig        `yaml:"metrics"`
 	Influx         InfluxConfig         `yaml:"influx"`
+	Wiki           WikiConfig           `yaml:"wiki"`
+	Emoji          EmojiConfig          `yaml:"emoji"`
 }
 
 func defaults() *Config {
@@ -107,6 +128,19 @@ func defaults() *Config {
 			Enabled:   false,
 			TimeoutMs: 5000,
 			QueueSize: 100,
+		},
+		Wiki: WikiConfig{
+			Enabled:         true,
+			Host:            "pt.wikipedia.org",
+			Lang:            "pt",
+			MaxExtractChars: 600,
+			TimeoutMs:       5000,
+			MaxRetries:      2,
+		},
+		Emoji: EmojiConfig{
+			Enabled:    true,
+			MaxResults: 8,
+			Lang:       "pt",
 		},
 	}
 }
@@ -282,6 +316,61 @@ func applyEnv(cfg *Config) error {
 		}
 		cfg.Influx.QueueSize = n
 	}
+	if v, ok := os.LookupEnv("WIKI_ENABLED"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: WIKI_ENABLED inválido: %w", err)
+		}
+		cfg.Wiki.Enabled = b
+	}
+	if v, ok := os.LookupEnv("WIKI_HOST"); ok {
+		cfg.Wiki.Host = v
+	}
+	if v, ok := os.LookupEnv("WIKI_LANG"); ok {
+		cfg.Wiki.Lang = v
+	}
+	if v, ok := os.LookupEnv("WIKI_USER_AGENT"); ok {
+		cfg.Wiki.UserAgent = v
+	}
+	if v, ok := os.LookupEnv("WIKI_MAX_EXTRACT_CHARS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("config: WIKI_MAX_EXTRACT_CHARS inválido: %w", err)
+		}
+		cfg.Wiki.MaxExtractChars = n
+	}
+	if v, ok := os.LookupEnv("WIKI_TIMEOUT_MS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("config: WIKI_TIMEOUT_MS inválido: %w", err)
+		}
+		cfg.Wiki.TimeoutMs = n
+	}
+	if v, ok := os.LookupEnv("WIKI_MAX_RETRIES"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("config: WIKI_MAX_RETRIES inválido: %w", err)
+		}
+		cfg.Wiki.MaxRetries = n
+	}
+
+	if v, ok := os.LookupEnv("EMOJI_ENABLED"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: EMOJI_ENABLED inválido: %w", err)
+		}
+		cfg.Emoji.Enabled = b
+	}
+	if v, ok := os.LookupEnv("EMOJI_DATA_FILE"); ok {
+		cfg.Emoji.DataFile = v
+	}
+	if v, ok := os.LookupEnv("EMOJI_MAX_RESULTS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("config: EMOJI_MAX_RESULTS inválido: %w", err)
+		}
+		cfg.Emoji.MaxResults = n
+	}
 
 	return nil
 }
@@ -351,6 +440,16 @@ func validate(cfg *Config) error {
 		}
 		if cfg.Influx.Token == "" {
 			errs = append(errs, errors.New("INFLUX_TOKEN é obrigatório quando INFLUX_ENABLED=true"))
+		}
+	}
+
+	if cfg.Wiki.Enabled {
+		if cfg.Wiki.Host == "" {
+			return errors.New("config: WIKI_HOST é obrigatório com WIKI_ENABLED=true")
+		}
+		// https://meta.wikimedia.org/wiki/User-Agent_policy
+		if cfg.Wiki.UserAgent == "" {
+			return errors.New("config: WIKI_USER_AGENT é obrigatório — a Wikimedia responde 403 sem User-Agent descritivo")
 		}
 	}
 
