@@ -53,3 +53,62 @@ docker compose up --build
 
 `deploy/bot.service` espera o binário em `/usr/local/bin/bot` e as variáveis
 de ambiente em `/etc/xmpp-translate-bot/env` (fora do repositório, `600`).
+
+---
+
+# xmpp-translate-bot (English)
+
+Translation bot for XMPP chat rooms (MUC), using self-hosted LibreTranslate
+as the language detection and translation backend.
+
+The project was built in incremental phases: foundation, minimal XMPP,
+mention parser, LibreTranslate client, pipeline, resilience, and
+packaging/deploy.
+
+## Configuration
+
+All keys are configurable via environment variable (which take precedence
+over YAML when both are present) — see `internal/config/config.go` and
+`configs/config.example.yaml` for the complete list. `XMPP_PASSWORD`,
+`LT_API_KEY` and `INFLUX_TOKEN` are env-only, never in YAML.
+
+## Build and tests
+
+```
+make build   # bin/bot
+make test
+make vet
+make run     # go run ./cmd/bot
+```
+
+## Container
+
+`deploy/Dockerfile` is multi-stage (build → distroless, static binary,
+`USER nonroot`) and works with Docker or Podman:
+
+```
+make docker-build                  # docker, by default
+make docker-build ENGINE=podman    # or podman
+```
+
+Exposes `/metrics` (Prometheus), `/healthz` (liveness) and `/readyz`
+(readiness: connected to XMPP + LibreTranslate languages loaded) on
+`METRICS_ADDR` (`:9090` by default).
+
+### Running with compose (bot + local InfluxDB2)
+
+`compose.yaml` brings up the bot and a local InfluxDB2 instance — just to
+test the async translation-events writer without depending on the
+production isaCloud. Compatible with `docker compose` and
+`podman compose` / `podman-compose`.
+
+```
+cp .env.example .env   # fill in the values
+docker compose up --build
+```
+
+### systemd (alternative to container)
+
+`deploy/bot.service` expects the binary at `/usr/local/bin/bot` and
+environment variables at `/etc/xmpp-translate-bot/env` (outside the
+repository, `600`).
