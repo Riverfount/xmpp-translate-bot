@@ -58,6 +58,11 @@ docker compose up --build
 `deploy/bot.service` espera o binário em `/usr/local/bin/bot` e as variáveis
 de ambiente em `/etc/xmpp-translate-bot/env` (fora do repositório, `600`).
 
+### Contribuindo
+
+Quer contribuir? Veja o [CONTRIBUTING.md](CONTRIBUTING.md) pra fluxo de
+desenvolvimento, padrões de código e como abrir um pull request.
+
 ---
 
 ## English
@@ -116,3 +121,8 @@ docker compose up --build
 `deploy/bot.service` expects the binary at `/usr/local/bin/bot` and
 environment variables at `/etc/xmpp-translate-bot/env` (outside the
 repository, `600`).
+
+### Contributing
+
+Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow, code style, and how to open a pull request.
