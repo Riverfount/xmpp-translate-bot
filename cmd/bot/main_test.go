@@ -116,6 +116,19 @@ func TestRun_WithInfluxEnabledCreatesWriterWithoutError(t *testing.T) {
 	}
 }
 
+func TestRun_SucceedsWithEmojiDisabled(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("EMOJI_ENABLED", "false")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var out bytes.Buffer
+	if err := run(ctx, &out, newFakeXMPPClient); err != nil {
+		t.Fatalf("run() error = %v, want nil", err)
+	}
+}
+
 type stubDetector struct{ lang string }
 
 func (d stubDetector) Detect(context.Context, string) (string, float64, error) {

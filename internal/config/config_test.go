@@ -288,6 +288,19 @@ func TestLoad_MaxTextLengthEnvOverride(t *testing.T) {
 	}
 }
 
+func TestLoad_EmojiLangEnvOverride(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("EMOJI_LANG", "es")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if cfg.Emoji.Lang != "es" {
+		t.Errorf("Emoji.Lang = %q, want es", cfg.Emoji.Lang)
+	}
+}
+
 func TestLoad_InvalidDefaultTarget(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DEFAULT_TARGET", "")
