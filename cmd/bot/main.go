@@ -109,6 +109,7 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 			return fmt.Errorf("carregando dataset de emoji: %w", err)
 		}
 		emojiLooker = store
+		logger.Info("emoji_dataset_loaded", "count", store.Count(), "lang", cfg.Emoji.Lang, "max_results", cfg.Emoji.MaxResults)
 	}
 
 	logger.Info("bot_starting",
@@ -118,8 +119,6 @@ func run(ctx context.Context, w io.Writer, newClient newXMPPClient) error {
 		"wiki_enabled", cfg.Wiki.Enabled,
 		"emoji_enabled", cfg.Emoji.Enabled,
 	)
-
-	logger.Info("emoji_dataset_loaded", "count", emojiLooker.(*lookup.EmojiStore).Count(), "lang", cfg.Emoji.Lang, "max_results", cfg.Emoji.MaxResults)
 
 	ltTimeout := time.Duration(cfg.LibreTranslate.TimeoutMs) * time.Millisecond
 	ltClient := translate.NewClient(cfg.LibreTranslate.URL, cfg.LibreTranslate.APIKey, ltTimeout, cfg.LibreTranslate.MaxRetries, logger)
