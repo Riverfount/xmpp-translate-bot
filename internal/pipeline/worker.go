@@ -164,48 +164,6 @@ func (d *Dispatcher) runJob(ctx context.Context, job TranslationJob) {
 	d.process(ctx, job)
 }
 
-//func (d *Dispatcher) process(ctx context.Context, job TranslationJob) {
-//	start := time.Now()
-//
-//	if job.Text == "" {
-//		d.respond(job.Room, d.cfg.Formatter.Help())
-//		return
-//	}
-//
-//	if max := d.cfg.Formatter.MaxTextLength; max > 0 && utf8.RuneCountInString(job.Text) > max {
-//		d.cfg.Logger.Info("text_too_long", "room", job.Room, "length", utf8.RuneCountInString(job.Text))
-//		d.respond(job.Room, d.cfg.Formatter.TextTooLong())
-//		return
-//	}
-//
-//	jobCtx, cancel := context.WithTimeout(ctx, d.cfg.JobTimeout)
-//	defer cancel()
-//
-//	lang, confidence, err := d.cfg.Detector.Detect(jobCtx, job.Text)
-//	if err != nil {
-//		d.recordOutcome(job, start, "", "", 0, "error", err)
-//		d.respond(job.Room, d.cfg.Formatter.TranslateError(err))
-//		return
-//	}
-//
-//	target := d.cfg.Formatter.ResolveTarget(lang)
-//	if lang == target {
-//		d.recordOutcome(job, start, lang, target, confidence, "already_target", nil)
-//		d.respond(job.Room, d.cfg.Formatter.AlreadyTarget(target))
-//		return
-//	}
-//
-//	translated, err := d.cfg.Translator.Translate(jobCtx, job.Text, lang, target)
-//	if err != nil {
-//		d.recordOutcome(job, start, lang, target, confidence, "error", err)
-//		d.respond(job.Room, d.cfg.Formatter.TranslateError(err))
-//		return
-//	}
-//
-//	d.recordOutcome(job, start, lang, target, confidence, "success", nil)
-//	d.respond(job.Room, d.cfg.Formatter.Success(lang, target, translated))
-//}
-
 func (d *Dispatcher) respond(room, body string) {
 	if err := d.cfg.Responder.SendGroup(room, body); err != nil {
 		d.cfg.Logger.Error("send_failed", "room", room, "error", err.Error())
