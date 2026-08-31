@@ -130,7 +130,7 @@ func defaults() *Config {
 			QueueSize: 100,
 		},
 		Wiki: WikiConfig{
-			Enabled:         true,
+			Enabled:         false,
 			Host:            "pt.wikipedia.org",
 			Lang:            "pt",
 			MaxExtractChars: 600,
@@ -445,11 +445,11 @@ func validate(cfg *Config) error {
 
 	if cfg.Wiki.Enabled {
 		if cfg.Wiki.Host == "" {
-			return errors.New("config: WIKI_HOST é obrigatório com WIKI_ENABLED=true")
+			errs = append(errs, errors.New("WIKI_HOST é obrigatório quando WIKI_ENABLED=true"))
 		}
 		// https://meta.wikimedia.org/wiki/User-Agent_policy
 		if cfg.Wiki.UserAgent == "" {
-			return errors.New("config: WIKI_USER_AGENT é obrigatório — a Wikimedia responde 403 sem User-Agent descritivo")
+			errs = append(errs, errors.New("WIKI_USER_AGENT é obrigatório quando WIKI_ENABLED=true — a Wikimedia responde 403 sem User-Agent descritivo"))
 		}
 	}
 
