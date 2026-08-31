@@ -364,6 +364,9 @@ func applyEnv(cfg *Config) error {
 	if v, ok := os.LookupEnv("EMOJI_DATA_FILE"); ok {
 		cfg.Emoji.DataFile = v
 	}
+	if v, ok := os.LookupEnv("EMOJI_LANG"); ok {
+		cfg.Emoji.Lang = v
+	}
 	if v, ok := os.LookupEnv("EMOJI_MAX_RESULTS"); ok {
 		n, err := strconv.Atoi(v)
 		if err != nil {

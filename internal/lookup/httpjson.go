@@ -32,6 +32,11 @@ type httpJSON struct {
 }
 
 func newHTTPJSON(userAgent string, timeout time.Duration, maxRetries int, transport http.RoundTripper) *httpJSON {
+	// maxRetries < 0 zeraria o laço de get() — nenhuma tentativa, retorno nil
+	// com out intacto. Trata como "sem retry".
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
 	return &httpJSON{
 		client:     &http.Client{Timeout: timeout, Transport: transport},
 		userAgent:  userAgent,

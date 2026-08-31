@@ -110,6 +110,9 @@ func (m *MediaWiki) Look(ctx context.Context, query string) (Result, error) {
 	}
 
 	summary, err = m.summary(ctx, hits.Pages[0].Key)
+	if err != nil && !isNotFound(err) {
+		return Result{}, err
+	}
 	if err != nil || summary.Extract == "" {
 		return Result{}, &NotFoundError{Query: query, Suggestions: append([]string{hits.Pages[0].Title}, suggestions...)}
 	}
