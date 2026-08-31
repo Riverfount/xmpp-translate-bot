@@ -29,3 +29,22 @@ logging:
 
 metrics:
   addr: ":9090"
+
+# Comando !wiki. Desabilitado por padrão: quando enabled=true, host e
+# user_agent passam a ser obrigatórios (a Wikimedia responde 403 sem
+# User-Agent descritivo — ver https://meta.wikimedia.org/wiki/User-Agent_policy).
+wiki:
+  enabled: false
+  host: "pt.wikipedia.org"
+  lang: "pt"
+  user_agent: ""
+  max_extract_chars: 600
+  timeout_ms: 5000
+  max_retries: 2
+
+# Comando !emoji. data_file vazio usa o dataset embutido no binário.
+emoji:
+  enabled: true
+  data_file: ""
+  max_results: 8
+  lang: "pt"
